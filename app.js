@@ -1,48 +1,60 @@
 import express from "express";
-import cors from "cors";
+import multer from "multer";
 import fetch from "node-fetch";
+import fs from "fs";
+import path from "path";
+import cors from "cors";
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+const KIRI_API_KEY = process.env.KIRI_API_KEY_ARK;
+
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.static("public"));
 
-// Mensagem de status
+// Configuração do multer (upload)
+const upload = multer({ dest: "uploads/" });
+
+// Rota de teste
 app.get("/", (req, res) => {
-  res.send("✅ Ark Scan 3D backend ativo e pronto!");
+  res.send("✅ Ark Scan 3D backend está rodando!");
 });
 
-// Rota de conversão via KIRI Engine
-app.post("/convert", async (req, res) => {
+// Rota para conversão de imagem → modelo 3D
+app.post("/convert", upload.single("file"), async (req, res) => {
   try {
-    const { type, files } = req.body; // type = "object" ou "place"
-    if (!files || files.length === 0) {
-      return res.status(400).json({ error: "Nenhum arquivo recebido." });
-    }
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: "Nenhum arquivo recebido" });
 
-    const KIRI_API_KEY = process.env.KIRI_API_KEY;
-    const apiUrl = "https://api.kiriengine.app/v1/scan";
+    console.log("📸 Enviando arquivo para KIRI Engine...");
 
-    const response = await fetch(apiUrl, {
+    const fileStream = fs.createReadStream(file.path);
+    const response = await fetch("https://www.kiriengine.app/api/convert", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${KIRI_API_KEY}`,
-        "Content-Type": "application/json",
+        Authorization: `Bearer ${KIRI_API_KEY}`,
       },
-      body: JSON.stringify({
-        mode: type === "place" ? "environment" : "object",
-        files,
-      }),
+      body: fileStream,
     });
 
-    const data = await response.json();
-    res.json(data);
+    const result = await response.json();
+    console.log("✅ Resposta da KIRI:", result);
 
-  } catch (error) {
-    console.error("Erro na conversão:", error);
-    res.status(500).json({ error: "Erro ao converter com a KIRI Engine." });
+    // Deleta o arquivo temporário
+    fs.unlinkSync(file.path);
+
+    if (result && result.modelUrl) {
+      return res.json({ success: true, modelUrl: result.modelUrl });
+    } else {
+      return res.status(500).json({ error: "Erro na conversão da KIRI" });
+    }
+  } catch (err) {
+    console.error("❌ Erro na conversão:", err);
+    res.status(500).json({ error: "Falha no servidor" });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+});
